@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install google-cloud-bigquery requests pandas
+          pip install google-cloud-bigquery requests pandas pyarrow
 
       - name: Run script
         env:
