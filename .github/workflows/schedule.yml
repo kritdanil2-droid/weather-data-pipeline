@@ -23,5 +23,5 @@ jobs:
 
       - name: Run script
         env:
-          BIGQUERY_KEY_JSON: ${{ secrets.BIGQUERY_SERVICE_ACCOUNT_KEY }}
+          BIGQUERY_SERVICE_ACCOUNT_KEY: ${{ secrets.BIGQUERY_SERVICE_ACCOUNT_KEY }}
         run: python main.py
