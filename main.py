@@ -1,20 +1,18 @@
 import os
 import json
 import requests
+import pandas as pd # Нам понадобится pandas
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from datetime import datetime
 
-# Настройки проекта
+# Настройки
 PROJECT_ID = 'my-learning-de-project'
 DATASET_ID = 'raw_data'
 TABLE_ID = 'weather_log'
-
-# Настройки Телеграм 
 TG_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TG_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
-# Список городов и их координаты
 CITIES = {
     "Moscow": {"lat": 55.75, "lon": 37.61},
     "Ufa": {"lat": 54.74, "lon": 55.97},
@@ -24,62 +22,55 @@ CITIES = {
 }
 
 def send_telegram_msg(text):
-    if not TG_CHAT_ID:
-        print("Telegram Chat ID не настроен, пропуск уведомления.")
-        return
+    if not TG_CHAT_ID: return
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = {"chat_id": TG_CHAT_ID, "text": text}
-    requests.post(url, json=payload)
+    try:
+        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text})
+    except:
+        print("Ошибка отправки в ТГ")
 
 def run_pipeline():
-    # 1. Авторизация в BigQuery
-    key_json = os.environ.get('BIGQUERY_SERVICE_ACCOUNT_KEY')
-    if not key_json:
-        print("Ошибка: Секрет BIGQUERY_SERVICE_ACCOUNT_KEY не найден!")
-        return
+    try:
+        # 1. Авторизация
+        key_json = os.environ.get('BIGQUERY_SERVICE_ACCOUNT_KEY')
+        info = json.loads(key_json)
+        creds = service_account.Credentials.from_service_account_info(info)
+        client = bigquery.Client(project=PROJECT_ID, credentials=creds)
 
-    info = json.loads(key_json)
-    creds = service_account.Credentials.from_service_account_info(info)
-    client = bigquery.Client(project=PROJECT_ID, credentials=creds)
-    table_id = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-
-    all_rows = []
-    
-    # 2. Цикл по городам
-    for city, coords in CITIES.items():
-        print(f"Забираю данные для {city}...")
-        url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&current_weather=true"
-        
-        try:
-            response = requests.get(url)
-            data = response.json()['current_weather']
-            temp = data['temperature']
+        all_data = []
+        for city, coords in CITIES.items():
+            print(f"Забираю данные для {city}...")
+            url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&current_weather=true"
+            res = requests.get(url).json()['current_weather']
             
-            all_rows.append({
+            all_data.append({
                 "city": city,
-                "temperature": temp,
-                "weather_code": int(data['weathercode']),
-                "timestamp": datetime.utcnow().isoformat()
+                "temperature": float(res['temperature']),
+                "weather_code": int(res['weathercode']),
+                "timestamp": pd.to_datetime(datetime.utcnow()) # Используем формат pandas
             })
-            
-            # 3. Логика уведомления для Уфы
             if city == "Ufa":
-                # Условие: если температура ниже 0 (или просто для теста при каждом запуске)
-                # Давай для теста сделаем уведомление всегда, чтобы ты проверил работу:
-                status = "морозно" if temp < 0 else "тепло"
-                msg = f"Привет из Уфы! 🏔\nТекущая температура: {temp}°C. На улице {status}."
-                send_telegram_msg(msg)
-                
-        except Exception as e:
-            print(f"Ошибка при обработке {city}: {e}")
+                send_telegram_msg(f"Уфа: {res['temperature']}°C. Данные собраны!")
 
-    # 4. Массовая загрузка в BigQuery
-    if all_rows:
-        errors = client.insert_rows_json(table_id, all_rows)
-        if errors == []:
-            print(f"Успех! Добавлено строк: {len(all_rows)}")
-        else:
-            print(f"Ошибки при вставке: {errors}")
+        # 2. ЗАГРУЗКА ЧЕРЕЗ LOAD JOB (Бесплатно для Free Tier)
+        df = pd.DataFrame(all_data)
+        table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+        
+        # Настройка загрузки
+        job_config = bigquery.LoadJobConfig(
+            write_disposition="WRITE_APPEND", # Добавлять в конец
+        )
+
+        job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
+        job.result() # Ждем завершения
+        
+        print(f"Успех! Загружено строк: {len(df)}")
+
+    except Exception as e:
+        error_msg = f"⚠️ Ошибка пайплайна: {str(e)}"
+        print(error_msg)
+        send_telegram_msg(error_msg)
+        exit(1)
 
 if __name__ == "__main__":
     run_pipeline()
