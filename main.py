@@ -13,7 +13,7 @@ TABLE_ID = 'weather_log'
 
 def run_pipeline():
     # 1. Получаем данные (Open-Meteo - Москва)
-    url = "[https://api.open-meteo.com/v1/forecast?latitude=55.75&longitude=37.61&current_weather=true](https://api.open-meteo.com/v1/forecast?latitude=55.75&longitude=37.61&current_weather=true)"
+    url = url = "https://api.open-meteo.com/v1/forecast?latitude=55.75&longitude=37.61&current_weather=true"
     response = requests.get(url)
     data = response.json()['current_weather']
     
